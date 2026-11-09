@@ -54,7 +54,20 @@ SECURE_COOKIES = _flag("ELBASH_SECURE_COOKIES", True)
 
 MAX_FILES = _int("ELBASH_MAX_FILES", 5000)
 MAX_FILE_MB = _int("ELBASH_MAX_FILE_MB", 40)
-MAX_JOB_MB = _int("ELBASH_MAX_JOB_MB", 4096)
+# A full month is about 1,500 photos. Straight off a phone they run 2-4 MB
+# each, so the ceiling has to clear 6 GB for an upload that skipped the
+# browser-side shrink; what actually protects the disk is MIN_FREE_MB below.
+MAX_JOB_MB = _int("ELBASH_MAX_JOB_MB", 8192)
+
+# Refuse to begin rather than fill the volume: a write that runs out of space
+# half way leaves a job with silently truncated photos, which reads as missing
+# deliveries. Older jobs are deleted to get back above this line first.
+MIN_FREE_MB = _int("ELBASH_MIN_FREE_MB", 2048)
+# How many of a user's earlier comparisons to keep when they start a new one.
+# Zero: the app shows one comparison at a time and offers no way back to an
+# older one, so a superseded upload is unreachable weight. Raise it if you ever
+# add a history view.
+KEEP_PREVIOUS_JOBS = _int("ELBASH_KEEP_PREVIOUS_JOBS", 0)
 
 # OCR saturates every core it is given, so running two jobs at once makes both
 # slower rather than either faster. Extra jobs wait in line.

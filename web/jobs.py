@@ -41,6 +41,10 @@ class Job:
     owner: str
     folder: Path
     created: float = field(default_factory=time.time)
+    # Last write. Separate from `created` because a month of photos takes
+    # minutes to arrive, and only this distinguishes an upload still in
+    # progress from one the client walked away from.
+    touched: float = field(default_factory=time.time)
 
     # new -> queued -> running -> done | error | stopped
     status: str = "new"
@@ -63,6 +67,10 @@ class Job:
         with self.lock:
             for key, value in fields.items():
                 setattr(self, key, value)
+            # A job that just finished has its result on somebody's screen, so
+            # the grace period should run from here rather than from the last
+            # photo that was uploaded hours earlier.
+            self.touched = time.time()
 
     def state(self) -> dict:
         with self.lock:
@@ -82,6 +90,17 @@ class Job:
         return payload
 
 
+class OutOfSpace(RuntimeError):
+    """The volume cannot take another upload even after old jobs were cleared."""
+
+
+FREE_CHECK_EVERY = 25
+# How long after its last write a job is still presumed in use. Long enough to
+# cover the gap between two batches of a slow upload, short enough that an
+# abandoned one is reclaimed on the next attempt rather than at the TTL.
+ACTIVE_GRACE_SECONDS = 180
+
+
 _jobs: dict[str, Job] = {}
 _registry_lock = threading.Lock()
 # Width 1 by default: the comparison already uses every core, so a second
@@ -91,8 +110,74 @@ _pool = ThreadPoolExecutor(
 )
 
 
-def create(owner: str) -> Job:
+def count() -> int:
+    with _registry_lock:
+        return len(_jobs)
+
+
+def free_mb() -> int:
+    """Megabytes still available on the volume holding the job folders."""
+    try:
+        return shutil.disk_usage(settings.DATA_DIR).free // (1024 * 1024)
+    except OSError:
+        return 0
+
+
+def _discard(job: Job) -> None:
+    with _registry_lock:
+        _jobs.pop(job.id, None)
+    shutil.rmtree(job.folder, ignore_errors=True)
+
+
+def _reclaimable(owner: str | None = None) -> list[Job]:
+    """Jobs safe to delete, oldest first.
+
+    A running job is the obvious exclusion. So is one written to moments ago:
+    that is an upload still arriving rather than an abandoned one, and deleting
+    it would strand a client midway through sending a month of photos.
+    """
+    now = time.time()
+    with _registry_lock:
+        idle = [
+            job for job in _jobs.values()
+            if job.status != "running"
+            and now - job.touched > ACTIVE_GRACE_SECONDS
+            and (owner is None or job.owner == owner)
+        ]
+    return sorted(idle, key=lambda job: job.created)
+
+
+def make_room(owner: str) -> None:
+    """Free disk before a new comparison, newest results kept longest.
+
+    A month of photos is a few gigabytes and the client runs this several
+    times a day, so holding every upload for a full day would fill the volume
+    on its own. This user's earlier jobs go first: the app shows one
+    comparison at a time with no way back to an older one, so by starting
+    another they have abandoned them - including an upload they walked away
+    from before pressing start. Other people's are only touched if that was
+    not enough, and a running job is never touched at all.
+    """
     purge_expired()
+
+    mine = _reclaimable(owner)
+    for job in mine[: max(0, len(mine) - settings.KEEP_PREVIOUS_JOBS)]:
+        _discard(job)
+
+    for job in _reclaimable():
+        if free_mb() >= settings.MIN_FREE_MB:
+            break
+        _discard(job)
+        print(f"storage: dropped job {job.id} to free space, {free_mb()} MB now free")
+
+
+def create(owner: str) -> Job:
+    make_room(owner)
+    if free_mb() < settings.MIN_FREE_MB:
+        raise OutOfSpace(
+            f"אין מספיק מקום פנוי בשרת ({free_mb()} מ״ב). "
+            "יש לפנות מקום ולנסות שוב."
+        )
     job_id = secrets.token_urlsafe(12)
     folder = settings.JOBS_DIR / job_id
     folder.mkdir(parents=True, exist_ok=True)
@@ -158,6 +243,17 @@ def store_upload(job: Job, filename: str, source: BinaryIO) -> str:
             raise ValueError(f"סך ההעלאה חורג מ-{settings.MAX_JOB_MB} מגה-בייט.")
         job.bytes_received += size
         job.file_count += 1
+        job.touched = time.time()
+        reserve = job.file_count % FREE_CHECK_EVERY == 0
+
+    # Checked periodically rather than per file: a thousand-photo upload would
+    # otherwise stat the volume a thousand times, and a few photos either side
+    # of the line make no difference next to the margin being defended.
+    if reserve and free_mb() < settings.MIN_FREE_MB:
+        raise OutOfSpace(
+            f"נגמר המקום הפנוי בשרת אחרי {job.file_count} קבצים. "
+            "ההעלאה נעצרה כדי לא לשמור תמונות חלקיות."
+        )
 
     # Exclusive create rather than exists()-then-write: uploads now land in
     # parallel threads, so two photos sharing a name could otherwise collide.

@@ -99,6 +99,11 @@ def _startup() -> None:
         print(f"Memory   : {_memory_budget()}")
         print(f"Workers  : {photos.OCR_WORKERS} for photos, "
               f"{pdf_report.PDF_WORKERS} for the report")
+        # A month of photos is several gigabytes, so the volume's size is as
+        # much a capacity question as the core count.
+        print(f"Storage  : {jobs.free_mb():,} MB free on {settings.DATA_DIR}, "
+              f"floor {settings.MIN_FREE_MB:,} MB, "
+              f"keeping {settings.KEEP_PREVIOUS_JOBS} previous job(s) per user")
     except tesseract_setup.TesseractMissing as exc:
         # Surfaced per job as well; logging it at boot makes a broken image obvious.
         print(f"WARNING: {exc}")
@@ -214,7 +219,12 @@ def index(request: Request, user: str = Depends(current_user)):
 # ---------------------------------------------------------------------- api
 @app.post("/api/jobs")
 def create_job(user: str = Depends(api_user)):
-    return {"id": jobs.create(user).id}
+    try:
+        return {"id": jobs.create(user).id}
+    except jobs.OutOfSpace as exc:
+        # 507 rather than 500: nothing is broken, the disk is simply full, and
+        # the browser shows the Hebrew text as-is.
+        raise HTTPException(status_code=507, detail=str(exc)) from None
 
 
 def _job_or_404(job_id: str, user: str) -> jobs.Job:
@@ -243,6 +253,10 @@ async def upload_files(
             )
         except ValueError as exc:
             rejected.append({"name": upload.filename, "reason": str(exc)})
+        except jobs.OutOfSpace as exc:
+            # Not a per-file problem: every remaining photo would fail the same
+            # way, so stop the batch instead of rejecting them one by one.
+            raise HTTPException(status_code=507, detail=str(exc)) from None
         finally:
             await upload.close()
     return {"stored": stored, "rejected": rejected, "total": job.file_count}
@@ -299,4 +313,5 @@ def photo(job_id: str, name: str, user: str = Depends(current_user)):
 
 @app.get("/healthz")
 def healthz():
-    return {"ok": True}
+    free = jobs.free_mb()
+    return {"ok": free >= settings.MIN_FREE_MB, "free_mb": free, "jobs": jobs.count()}

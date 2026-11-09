@@ -29,7 +29,7 @@ os.environ["ELBASH_SECRET_KEY"] = "test-only-key"
 from fastapi.testclient import TestClient  # noqa: E402
 from openpyxl import load_workbook  # noqa: E402
 
-from web import auth, main  # noqa: E402
+from web import auth, jobs, main  # noqa: E402
 
 PASSWORD = "test-password-123"
 failures: list[str] = []
@@ -201,6 +201,48 @@ def main_test() -> int:
             intruder.post("/login", data={"username": "other", "password": PASSWORD, "csrf": c2})
             stolen = intruder.get(f"/api/jobs/{job_id}")
             check("another user cannot read the job", stolen.status_code, 404)
+
+        print("\n-- storage")
+        # A month is a few gigabytes and the client runs this several times a
+        # day, so a superseded upload has to give its disk back. Its own user,
+        # to leave the job the isolation checks above rely on alone.
+        auth.create_user("housekeeper", PASSWORD)
+        with TestClient(main.app) as keeper:
+            page = keeper.get("/login")
+            c3 = page.text.split('name="csrf" value="')[1].split('"')[0]
+            keeper.post("/login",
+                        data={"username": "housekeeper", "password": PASSWORD, "csrf": c3})
+            h3 = {"X-CSRF-Token": keeper.get("/").text.split('csrf: "')[1].split('"')[0]}
+
+            old = keeper.post("/api/jobs", headers=h3).json()["id"]
+            keeper.post(f"/api/jobs/{old}/files", headers=h3,
+                        files=[("files", ("a.jpg", b"x" * 2048, "image/jpeg"))])
+            old_folder = jobs.settings.JOBS_DIR / old
+
+            fresh = keeper.post("/api/jobs", headers=h3).json()["id"]
+            check("an upload still in flight is spared", old_folder.exists(), True)
+
+            # Age it past the grace that protects an arriving upload, the way
+            # hours between two runs would.
+            jobs._jobs[old].touched -= jobs.ACTIVE_GRACE_SECONDS + 60
+            keeper.post("/api/jobs", headers=h3)
+            check("superseded job is deleted", old_folder.exists(), False)
+            check("superseded job is gone from the api",
+                  keeper.get(f"/api/jobs/{old}", headers=h3).status_code, 404)
+
+            # And the full-disk path, forced rather than waited for.
+            floor = jobs.settings.MIN_FREE_MB
+            jobs.settings.MIN_FREE_MB = 10 ** 9
+            try:
+                full = keeper.post("/api/jobs", headers=h3)
+                check("full disk refuses a new job", full.status_code, 507)
+                check("full disk says so in Hebrew", "מקום" in full.json()["error"])
+                check("healthz reports the shortage", keeper.get("/healthz").json()["ok"], False)
+            finally:
+                jobs.settings.MIN_FREE_MB = floor
+            check("healthz recovers", keeper.get("/healthz").json()["ok"], True)
+            check("fresh job survived the sweep",
+                  keeper.get(f"/api/jobs/{fresh}", headers=h3).status_code, 200)
 
         print("\n-- logout")
         client.get("/logout")
