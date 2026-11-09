@@ -20,6 +20,25 @@ from . import auth, jobs, settings
 HERE = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(HERE / "templates"))
 
+
+def _asset_version() -> str:
+    """A token that changes whenever the CSS or JS does.
+
+    The page itself is rendered per request, so a new template reaches the
+    browser immediately while the script it depends on can still be served
+    from cache. The two then disagree - a tab the HTML declares but the old
+    script has never heard of renders as "undefined" and throws when clicked.
+    Stamping the URL with the file times makes an updated asset a new URL.
+    """
+    newest = max(
+        (p.stat().st_mtime for p in (HERE / "static").iterdir() if p.is_file()),
+        default=0.0,
+    )
+    return f"{int(newest):x}"
+
+
+templates.env.globals["asset_version"] = _asset_version()
+
 app = FastAPI(title=settings.APP_TITLE, docs_url=None, redoc_url=None)
 app.add_middleware(
     SessionMiddleware,

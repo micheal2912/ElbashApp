@@ -1,4 +1,4 @@
-"""Write the comparison to Excel (multi-sheet) or CSV."""
+"""Write the comparison to a multi-sheet Excel workbook."""
 
 from pathlib import Path
 
@@ -29,6 +29,24 @@ def _frames(result: ComparisonResult) -> dict[str, pd.DataFrame]:
             ("הושלם", "כן" if result.is_complete else "לא"),
         ],
         columns=["פריט", "ערך"],
+    )
+
+    overview = pd.DataFrame(
+        [
+            {
+                "סטטוס": row.status,
+                "מס' תעודה": row.number,
+                "תאריך": row.date,
+                "סוג": row.kind_label,
+                "מסלול": row.route,
+                "עמוד בדוח": row.page,
+                "תמונות": ", ".join(row.photos),
+                "הערה": row.detail,
+            }
+            for row in result.overview()
+        ],
+        columns=["סטטוס", "מס' תעודה", "תאריך", "סוג", "מסלול", "עמוד בדוח",
+                 "תמונות", "הערה"],
     )
 
     missing = pd.DataFrame(
@@ -83,6 +101,7 @@ def _frames(result: ComparisonResult) -> dict[str, pd.DataFrame]:
 
     return {
         "סיכום": summary,
+        "מבט כללי": overview,
         "חסרות": missing,
         "נמצאו": matched,
         "בעיות": problems,

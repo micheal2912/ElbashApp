@@ -14,6 +14,10 @@ from .photos import (
 
 KIND_WORD = {DELIVERY: "מסירה", PICKUP: "איסוף", "": "סוג לא ידוע"}
 
+STATUS_FOUND = "נמצא"
+STATUS_MISSING = "חסר"
+STATUS_PROBLEM = "בעיה"
+
 REASON_NOT_IN_PDF = "לא בדוח"
 REASON_UNREADABLE = "המספר לא זוהה"
 REASON_AMBIGUOUS = "לא חד-משמעי"
@@ -35,6 +39,18 @@ class ProblemItem:
     file: str
     number: str | None
     reason: str
+    detail: str
+
+
+@dataclass
+class OverviewRow:
+    status: str
+    number: str
+    date: str
+    kind_label: str
+    route: str
+    page: str
+    photos: list[str]
     detail: str
 
 
@@ -64,6 +80,46 @@ class ComparisonResult:
     @property
     def is_complete(self) -> bool:
         return bool(self.report.rows) and not self.missing and not self.problems
+
+    def overview(self) -> list[OverviewRow]:
+        """Every report row and every problem photo, each carrying its status.
+
+        The per-status views each answer one question, which means looking a
+        certificate number up starts with guessing which of them it landed in.
+        Here the status is a column rather than a view, so one pass covers the
+        whole comparison. Shared by the table and the Excel sheet so the two
+        can never disagree about what happened to a row.
+        """
+        photos_for_number = {item.number: item.photos for item in self.matched}
+
+        rows = [
+            OverviewRow(
+                status=STATUS_FOUND if row.number in photos_for_number else STATUS_MISSING,
+                number=row.number,
+                date=row.date,
+                kind_label=row.kind_label,
+                route=row.route,
+                page=str(row.page),
+                photos=photos_for_number.get(row.number, []),
+                detail="",
+            )
+            for row in self.report.rows
+        ]
+
+        # Problem photos are not report rows - they are the same question asked
+        # from the other side - but leaving them out would make this
+        # "everything except the part that needs attention".
+        rows += [
+            OverviewRow(
+                status=STATUS_PROBLEM,
+                number=item.number or "",
+                date="", kind_label="", route="", page="",
+                photos=[item.file],
+                detail=item.detail,
+            )
+            for item in self.problems
+        ]
+        return rows
 
     def missing_by_date(self) -> list[tuple[str, int, int]]:
         """(date, missing, total) per report date, chronological."""

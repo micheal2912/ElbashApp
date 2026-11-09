@@ -7,6 +7,7 @@ the way the browser does (in batches), waits for the comparison and verifies
 the numbers plus the Excel/CSV downloads.
 """
 
+import io
 import os
 import shutil
 import sys
@@ -26,6 +27,7 @@ os.environ["ELBASH_SECURE_COOKIES"] = "0"
 os.environ["ELBASH_SECRET_KEY"] = "test-only-key"
 
 from fastapi.testclient import TestClient  # noqa: E402
+from openpyxl import load_workbook  # noqa: E402
 
 from web import auth, main  # noqa: E402
 
@@ -74,6 +76,11 @@ def main_test() -> int:
         home = client.get("/")
         check("app page loads", home.status_code, 200)
         check("page is RTL Hebrew", 'dir="rtl"' in home.text)
+        # Without a version stamp the browser keeps an old app.js against a new
+        # page, and a tab the page declares but the script lacks breaks all of
+        # them - which is what happened in production.
+        check("script is version-stamped", "/static/app.js?v=" in home.text)
+        check("stylesheet is version-stamped", "/static/app.css?v=" in home.text)
         token = home.text.split("csrf: \"")[1].split('"')[0]
         head = {"X-CSRF-Token": token}
 
@@ -174,6 +181,9 @@ def main_test() -> int:
         xlsx = client.get(f"/api/jobs/{job_id}/export/excel")
         check("excel status", xlsx.status_code, 200)
         check("excel is a zip container", xlsx.content[:2], b"PK")
+        sheets = load_workbook(io.BytesIO(xlsx.content), read_only=True).sheetnames
+        check("overview sheet follows the summary", sheets[:2], ["סיכום", "מבט כללי"])
+        check("csv sheet set unchanged otherwise", "חסרות" in sheets)
         gone = client.get(f"/api/jobs/{job_id}/export/csv")
         check("retired csv export is 404", gone.status_code, 404)
 

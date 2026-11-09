@@ -355,12 +355,17 @@ function render() {
 
   for (const tab of document.querySelectorAll(".tab")) {
     const key = tab.dataset.tab;
+    if (!TAB_LABEL[key]) continue;   // leave an unrecognised tab as authored
     tab.textContent = `${TAB_LABEL[key]} (${(payload[key] || []).length})`;
   }
   renderTable();
 }
 
 function renderTable() {
+  // A tab the page offers but this script does not know how to draw means the
+  // two came from different versions. Falling back keeps the rest of the
+  // tables usable instead of throwing and leaving every tab dead.
+  if (!COLUMNS[activeTab]) activeTab = "overview";
   const columns = COLUMNS[activeTab];
   const needle = $("filter").value.trim().toLowerCase();
   let rows = payload[activeTab] || [];
