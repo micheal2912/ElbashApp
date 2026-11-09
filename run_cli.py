@@ -44,13 +44,10 @@ def main() -> int:
     for warning in report.warnings:
         print(f"  ! {warning}")
 
-    def progress(done, total, name):
-        if name:
-            print(f"  OCR {done}/{total}  {name}")
-
     clock = time.perf_counter()
+    # read_folder logs a line per photo itself, so there is nothing to add here.
     results = photos.read_folder(
-        folder, progress=progress, use_cache=not args.rescan, workers=args.workers
+        folder, use_cache=not args.rescan, workers=args.workers
     )
     t_ocr = time.perf_counter() - clock
     outcome = compare_mod.compare(report, results)

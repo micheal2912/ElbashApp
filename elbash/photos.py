@@ -1,7 +1,9 @@
 """OCR delivery screenshots and pull out the מספר משלוח value."""
 
 import json
+import os
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -22,6 +24,15 @@ CACHE_NAME = ".elbash_ocr_cache.json"
 # past 16 because the tesseract processes start contending for cores.
 OCR_WORKERS = min(16, max(2, available_cores()))
 
+# Tesseract also splits a single image across OpenMP threads, which is wasted
+# effort when every core is already busy with another photo: its threads just
+# multiply against ours. Capping it to one cut the photo stage by 1.4x on a
+# six-core container and 1.8x on a two-core one. Where the pool leaves cores
+# spare - a 22-core machine runs only 16 workers - letting tesseract use them
+# is the better trade, and measured 10% faster, so the cap is conditional.
+if OCR_WORKERS >= available_cores():
+    os.environ.setdefault("OMP_THREAD_LIMIT", "1")
+
 # Tesseract reads "משלוח" as "ישלוח"/"משלות" on dim photos, so anchor on the
 # stable "שלוח" core instead of the full word.
 ANCHOR = "שלוח"
@@ -40,6 +51,16 @@ CONFIDENCE_REPORT = "report-match"
 CONFIDENCE_NONE = "unreadable"
 
 
+def _log(line: str) -> None:
+    """One line per photo on stdout, so a slow run is visible while it runs.
+
+    The progress callback only tells the browser a count; when a batch crawls,
+    the question is always which photo and how long, and that has to be
+    readable in `docker compose logs -f` as it happens, not after it finishes.
+    """
+    print(line, flush=True)
+
+
 @dataclass
 class PhotoResult:
     file: str
@@ -50,6 +71,7 @@ class PhotoResult:
     anchor_line: str = ""
     passes_used: int = 0
     error: str = ""
+    seconds: float = 0.0
 
 
 def list_photos(folder: str | Path) -> list[Path]:
@@ -121,6 +143,13 @@ def _parse_text(text: str) -> tuple[str | None, str, str, list[str]]:
 
 def read_photo(path: str | Path) -> PhotoResult:
     """OCR one screenshot, escalating preprocessing until the number is found."""
+    started = time.monotonic()
+    result = _read_photo(path)
+    result.seconds = time.monotonic() - started
+    return result
+
+
+def _read_photo(path: str | Path) -> PhotoResult:
     path = Path(path)
     result = PhotoResult(file=path.name)
 
@@ -208,6 +237,11 @@ def read_folder(
                     results[path.name] = result
                     cache[_cache_key(path)] = asdict(result)
                     done += 1
+                    _log(
+                        f"photo {done}/{total} {result.seconds:5.1f}s "
+                        f"{result.passes_used} pass{'' if result.passes_used == 1 else 'es'} "
+                        f"{result.number or result.error or 'no number'} {path.name}"
+                    )
                     if progress:
                         progress(done, total, path.name)
                     if should_stop and should_stop():

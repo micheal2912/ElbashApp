@@ -31,6 +31,7 @@ let payload = null;       // last result from the server
 let activeTab = "missing";
 let poller = null;
 let cancelled = false;
+let startedAt = 0;        // wall clock of the current run, for the elapsed timer
 
 const ext = (name) => (name.split(".").pop() || "").toLowerCase();
 const isImage = (f) => IMAGE_EXT.includes(ext(f.name));
@@ -202,7 +203,12 @@ async function uploadAll() {
 function setProgress(done, total, message, detail) {
   $("progress-message").textContent = message || "";
   $("progress-detail").textContent = detail || "";
-  $("progress-count").textContent = total ? `${done} / ${total}` : "";
+
+  // A bare count cannot distinguish "slow" from "stuck", and that is the only
+  // question worth answering while a long batch runs, so show the clock too.
+  const elapsed = startedAt ? Math.round((Date.now() - startedAt) / 1000) : 0;
+  const clock = elapsed ? ` · ${elapsed} שנ׳` : "";
+  $("progress-count").textContent = total ? `${done} / ${total}${clock}` : clock.slice(3);
 
   // Nothing has finished yet, but work is happening - sweep rather than sit
   // at zero, which reads as a hang.
@@ -217,6 +223,7 @@ async function run() {
   $("results").classList.add("hidden");
   $("progress-panel").classList.remove("hidden");
   $("run").disabled = true;
+  startedAt = Date.now();
   setProgress(0, chosen.length, "מתחיל בהעלאה…", "");
 
   try {
