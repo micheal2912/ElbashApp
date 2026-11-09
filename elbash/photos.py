@@ -273,11 +273,13 @@ def _read_photo(path: str | Path, known: Collection[str] | None = None) -> Photo
     def ladder():
         yield from _passes(image)
         yield from _deskew_passes(image)
-        # No seven digits anywhere, at any contrast, is the signature of a
-        # photo held sideways: the text runs vertically and tesseract returns
-        # nothing rather than something wrong. Only then are quarter turns
-        # worth their cost.
-        if not seen:
+        # No anchored number at all is the signature of a photo held sideways:
+        # the lines run vertically, so tesseract never finds "משלוח" next to
+        # digits. Measured against rotated copies, keying this off stray
+        # candidates instead cost almost all of the recovery - a sideways photo
+        # still yields loose seven-digit runs, which looked like progress and
+        # suppressed the quarter turns.
+        if unvouched is None:
             yield from _rotation_passes(image)
 
     for index, (variant, config, label) in enumerate(ladder(), start=1):
