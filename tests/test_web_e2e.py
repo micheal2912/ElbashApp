@@ -103,6 +103,23 @@ def main_test() -> int:
         ).json()
         check("unsupported type rejected", len(blocked["rejected"]), 1)
 
+        # Uploads are copied in parallel worker threads now, so two photos
+        # sharing a name must not land on top of each other.
+        clash = client.post(
+            f"/api/jobs/{probe}/files",
+            headers=head,
+            files=[
+                ("files", ("same.jpg", b"first-file-contents", "image/jpeg")),
+                ("files", ("same.jpg", b"second-different-contents", "image/jpeg")),
+            ],
+        ).json()
+        check("duplicate names kept apart", len(set(clash["stored"])), 2)
+        sizes = {
+            (main.settings.JOBS_DIR / probe / n).read_bytes()
+            for n in clash["stored"]
+        }
+        check("neither duplicate was overwritten", len(sizes), 2)
+
         print("\n-- upload")
         job_id = client.post("/api/jobs", headers=head).json()["id"]
         check("job created", bool(job_id))

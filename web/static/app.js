@@ -6,12 +6,26 @@ const $ = (id) => document.getElementById(id);
 
 const IMAGE_EXT = ["jpg", "jpeg", "png", "bmp", "webp", "tif", "tiff"];
 // Each request carries a few files rather than one, so 1400 photos do not mean
-// 1400 round trips; several requests are in flight at once.
+// 1400 round trips; several requests are in flight at once. Keep the batch well
+// under 100 MB - Cloudflare rejects request bodies above that.
 const BATCH_BYTES = 24 * 1024 * 1024;
 const BATCH_FILES = 12;
-const PARALLEL_UPLOADS = 3;
+const PARALLEL_UPLOADS = 6;
+
+// Phone photos come off the camera around 2 MB; re-encoding typically lands
+// near a quarter of that, which is the difference between a minute and twenty
+// on an office uplink. Below the threshold there is nothing worth saving.
+const RECODE_QUALITY = 0.82;
+const RECODE_MIN_BYTES = 500 * 1024;
 
 let chosen = [];          // File objects waiting to be uploaded
+// Re-encoding trades browser CPU for bytes on the wire. Over a tunnel or a
+// LAN that is a large win; served from this machine there is no network to
+// save and it only slows the upload down, so default to whichever the address
+// bar implies and let the checkbox override it.
+const LOCAL_HOSTS = ["localhost", "127.0.0.1", "[::1]", "::1"];
+let shrink = !LOCAL_HOSTS.includes(location.hostname);
+let savedBytes = 0;
 let jobId = null;
 let payload = null;       // last result from the server
 let activeTab = "missing";
@@ -126,21 +140,54 @@ function batches(files) {
   return out;
 }
 
+// Re-encode a photo to a smaller JPEG before it goes over the wire.
+//
+// imageOrientation:"from-image" is load-bearing: a canvas drops EXIF, and the
+// OCR relies on exif_transpose() to straighten these photos. Baking the
+// rotation into the pixels keeps them upright once the tag is gone. Anything
+// unexpected - an unsupported browser, a file the decoder dislikes, a result
+// no smaller than the original - falls back to sending the file untouched.
+async function recode(file) {
+  if (!shrink || !isImage(file) || file.size < RECODE_MIN_BYTES) return file;
+  try {
+    const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+    canvas.getContext("2d").drawImage(bitmap, 0, 0);
+    bitmap.close();
+
+    const blob = await canvas.convertToBlob({ type: "image/jpeg", quality: RECODE_QUALITY });
+    if (!blob || blob.size >= file.size) return file;
+    savedBytes += file.size - blob.size;
+    return new File([blob], file.name, { type: "image/jpeg" });
+  } catch {
+    return file;
+  }
+}
+
 async function uploadAll() {
   const groups = batches(chosen);
   let uploaded = 0;
   const rejected = [];
   let next = 0;
+  savedBytes = 0;
 
   async function worker() {
     while (next < groups.length && !cancelled) {
       const group = groups[next++];
       const form = new FormData();
-      for (const file of group) form.append("files", file, file.name);
+      // Sequential within the batch: several 12-megapixel bitmaps decoded at
+      // once is a lot of memory for no gain, and the other workers are already
+      // keeping the network busy.
+      for (const file of group) {
+        const prepared = await recode(file);
+        form.append("files", prepared, file.name);
+      }
       const body = await api(`/api/jobs/${jobId}/files`, { method: "POST", body: form });
       rejected.push(...(body.rejected || []));
       uploaded += group.length;
-      setProgress(uploaded, chosen.length, `מעלה ${uploaded} מתוך ${chosen.length} קבצים`, "");
+      const saved = savedBytes ? ` · נחסכו ${mb(savedBytes)} מ״ב` : "";
+      setProgress(uploaded, chosen.length,
+        `מעלה ${uploaded} מתוך ${chosen.length} קבצים${saved}`, "");
     }
   }
 
@@ -383,6 +430,8 @@ $("pick-folder").onclick = () => $("folder-input").click();
 $("file-input").onchange = (e) => addFiles([...e.target.files]);
 $("folder-input").onchange = (e) => addFiles([...e.target.files]);
 
+$("shrink").checked = shrink;
+$("shrink").onchange = (e) => { shrink = e.target.checked; };
 $("clear").onclick = reset;
 $("restart").onclick = () => { reset(); window.scrollTo({ top: 0, behavior: "smooth" }); };
 $("run").onclick = run;

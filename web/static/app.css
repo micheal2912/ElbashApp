@@ -113,7 +113,12 @@ input:focus-visible, button:focus-visible, .dropzone:focus-visible {
   padding-top: 16px; border-top: 1px solid var(--line);
 }
 .selection-counts { font-weight: 600; }
-.selection-actions { display: flex; gap: 8px; }
+.selection-actions { display: flex; gap: 8px; align-items: center; }
+.checkbox {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 14px; color: var(--muted); cursor: pointer; margin-inline-end: 6px;
+}
+.checkbox input { cursor: pointer; }
 .sep { color: var(--muted); margin: 0 6px; font-weight: 400; }
 
 /* -------------------------------------------------------------- progress */

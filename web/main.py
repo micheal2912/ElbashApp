@@ -8,6 +8,7 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Upload
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
 from elbash import tesseract_setup
@@ -164,7 +165,6 @@ def _job_or_404(job_id: str, user: str) -> jobs.Job:
 @app.post("/api/jobs/{job_id}/files")
 async def upload_files(
     job_id: str,
-    request: Request,
     files: list[UploadFile] = File(...),
     user: str = Depends(api_user),
 ):
@@ -172,7 +172,13 @@ async def upload_files(
     stored, rejected = [], []
     for upload in files:
         try:
-            stored.append(jobs.store_upload(job, upload.filename or "", await upload.read()))
+            # Copied in a worker thread: a few megabytes written straight from
+            # the event loop would block every other request on this process.
+            stored.append(
+                await run_in_threadpool(
+                    jobs.store_upload, job, upload.filename or "", upload.file
+                )
+            )
         except ValueError as exc:
             rejected.append({"name": upload.filename, "reason": str(exc)})
         finally:

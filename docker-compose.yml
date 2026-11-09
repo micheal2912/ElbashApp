@@ -6,6 +6,13 @@ services:
       # Bound to localhost: put a TLS terminator (Caddy, nginx, Cloudflare) in
       # front of it. The session cookie is marked Secure, so plain HTTP from
       # another machine will not keep you logged in.
+      #
+      # Uploading a full month through a tunnel sends every byte out to the
+      # edge and back again. On the machine running this, go to
+      # http://localhost:8000 instead and the photos never leave it. To reach
+      # it from elsewhere on the LAN, publish on all interfaces ("8000:8000")
+      # and set ELBASH_SECURE_COOKIES=0 - a bare http:// address is not a
+      # secure context, so the browser would otherwise drop the login cookie.
       - "127.0.0.1:8000:8000"
     environment:
       # Generate once with: python -c "import secrets;print(secrets.token_urlsafe(48))"

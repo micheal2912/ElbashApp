@@ -1,5 +1,6 @@
 """Upload storage and the background comparison queue."""
 
+import os
 import re
 import secrets
 import shutil
@@ -9,6 +10,7 @@ import traceback
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import BinaryIO
 
 from elbash import compare as compare_mod
 from elbash import export, pdf_report, photos
@@ -130,13 +132,21 @@ def purge_expired() -> None:
                     pass
 
 
-def store_upload(job: Job, filename: str, data: bytes) -> str:
-    """Write one uploaded file into the job folder. Returns the stored name."""
+def store_upload(job: Job, filename: str, source: BinaryIO) -> str:
+    """Stream one uploaded file into the job folder. Returns the stored name.
+
+    Blocking on purpose: the caller hands this to a worker thread so the copy
+    never runs on the event loop, where it would stall the other uploads in
+    flight and the progress polling behind them.
+    """
     name = safe_name(filename)
-    suffix = Path(name).suffix.lower()
-    if suffix not in settings.ALLOWED_SUFFIXES:
+    if Path(name).suffix.lower() not in settings.ALLOWED_SUFFIXES:
         raise ValueError(f"סוג קובץ לא נתמך: {name}")
-    if len(data) > settings.MAX_FILE_MB * 1024 * 1024:
+
+    source.seek(0, os.SEEK_END)
+    size = source.tell()
+    source.seek(0)
+    if size > settings.MAX_FILE_MB * 1024 * 1024:
         raise ValueError(f"הקובץ {name} גדול מ-{settings.MAX_FILE_MB} מגה-בייט.")
 
     with job.lock:
@@ -144,16 +154,23 @@ def store_upload(job: Job, filename: str, data: bytes) -> str:
             raise ValueError("העבודה כבר התחילה.")
         if job.file_count >= settings.MAX_FILES:
             raise ValueError(f"יותר מ-{settings.MAX_FILES} קבצים.")
-        if job.bytes_received + len(data) > settings.MAX_JOB_MB * 1024 * 1024:
+        if job.bytes_received + size > settings.MAX_JOB_MB * 1024 * 1024:
             raise ValueError(f"סך ההעלאה חורג מ-{settings.MAX_JOB_MB} מגה-בייט.")
-        job.bytes_received += len(data)
+        job.bytes_received += size
         job.file_count += 1
 
+    # Exclusive create rather than exists()-then-write: uploads now land in
+    # parallel threads, so two photos sharing a name could otherwise collide.
     target = job.folder / name
-    if target.exists():
-        stem, ext = Path(name).stem, Path(name).suffix
-        target = job.folder / f"{stem}_{secrets.token_hex(3)}{ext}"
-    target.write_bytes(data)
+    while True:
+        try:
+            handle = target.open("xb")
+            break
+        except FileExistsError:
+            target = job.folder / f"{Path(name).stem}_{secrets.token_hex(3)}{Path(name).suffix}"
+
+    with handle:
+        shutil.copyfileobj(source, handle, 1024 * 1024)
     return target.name
 
 
