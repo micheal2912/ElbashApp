@@ -92,6 +92,15 @@ def compare(report: Report, photos: list[PhotoResult]) -> ComparisonResult:
         number = photo.number
         confidence = photo.confidence
 
+        # An anchored number the report does not list is more often a misread
+        # digit than a stray delivery, so give the report's own numbers a say
+        # before writing the photo off: if exactly one other number the OCR saw
+        # is in the report, that is the reading to trust.
+        if number and number not in known:
+            vouched = [c for c in photo.candidates if c in known]
+            if len(vouched) == 1:
+                number, confidence = vouched[0], CONFIDENCE_REPORT
+
         # No anchored hit: accept a candidate only if the report vouches for it.
         if not number:
             vouched = [c for c in photo.candidates if c in known]

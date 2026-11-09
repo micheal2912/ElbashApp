@@ -23,6 +23,10 @@ CONFIDENCE_HE = {
     photos.CONFIDENCE_NONE: "לא נקרא",
 }
 
+STATUS_FOUND = "נמצא"
+STATUS_MISSING = "חסר"
+STATUS_PROBLEM = "בעיה"
+
 # Keep Hebrew, Latin, digits and the few punctuation marks a camera uses; turn
 # everything else into an underscore. Any directory part is dropped separately.
 _UNSAFE = re.compile(r"[^\w.\-() \u0590-\u05FF]+", re.UNICODE)
@@ -228,6 +232,9 @@ def _run(job: Job) -> None:
             progress=photo_progress,
             use_cache=False,
             should_stop=job.stop_flag.is_set,
+            # The report is already read, so the OCR can check a number against
+            # it and keep trying when it does not fit.
+            known=report.numbers,
         )
         if job.stop_flag.is_set():
             job.progress(status="stopped", message="הופסק.")
@@ -299,17 +306,50 @@ def result_payload(result: compare_mod.ComparisonResult) -> dict:
             {"date": date, "have": total - miss, "missing": miss, "total": total}
             for date, miss, total in result.missing_by_date()
         ],
+        "overview": _overview(result),
     }
 
 
-def export_file(job: Job, kind: str) -> Path:
-    """Build the Excel/CSV export inside the job folder and return its path."""
+def _overview(result: compare_mod.ComparisonResult) -> list[dict]:
+    """Every report row and every problem photo in one searchable table.
+
+    The other tabs each answer one question, which means looking a certificate
+    number up means guessing which tab it landed in first. Here the status is a
+    column instead of a tab, so one search covers the whole comparison.
+    """
+    photos_for_number = {item.number: item.photos for item in result.matched}
+
+    rows = [
+        {
+            "number": row.number,
+            "date": row.date,
+            "kind": row.kind_label,
+            "route": row.route,
+            "page": row.page,
+            "status": STATUS_FOUND if row.number in photos_for_number else STATUS_MISSING,
+            "photos": photos_for_number.get(row.number, []),
+            "detail": "",
+        }
+        for row in result.report.rows
+    ]
+
+    # Problem photos are not report rows - they are the other direction of the
+    # same question - but leaving them out would make this "everything except
+    # the part that needs attention".
+    rows += [
+        {
+            "number": item.number or "", "date": "", "kind": "", "route": "", "page": "",
+            "status": STATUS_PROBLEM, "photos": [item.file], "detail": item.detail,
+        }
+        for item in result.problems
+    ]
+    return rows
+
+
+def export_file(job: Job) -> Path:
+    """Build the Excel export inside the job folder and return its path."""
     if job.result is None:
         raise ValueError("אין עדיין תוצאה לייצוא.")
-    stem = "השוואה" if kind == "excel" else "חסרות"
-    path = job.folder / f"{stem}.{'xlsx' if kind == 'excel' else 'csv'}"
-    if kind == "excel":
-        export.to_excel(job.result, path)
-    else:
-        export.to_csv(job.result, path)
+    path = job.folder / "השוואה.xlsx"
+    export.to_excel(job.result, path)
     return path

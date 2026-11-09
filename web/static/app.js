@@ -28,7 +28,7 @@ let shrink = !LOCAL_HOSTS.includes(location.hostname);
 let savedBytes = 0;
 let jobId = null;
 let payload = null;       // last result from the server
-let activeTab = "missing";
+let activeTab = "overview";
 let poller = null;
 let cancelled = false;
 let startedAt = 0;        // wall clock of the current run, for the elapsed timer
@@ -224,6 +224,7 @@ async function run() {
   $("progress-panel").classList.remove("hidden");
   $("run").disabled = true;
   startedAt = Date.now();
+  savedBytes = 0;   // per run, or a second comparison inherits the first's total
   setProgress(0, chosen.length, "מתחיל בהעלאה…", "");
 
   try {
@@ -272,6 +273,15 @@ async function poll() {
 /* --------------------------------------------------------------- results */
 
 const COLUMNS = {
+  overview: [
+    { key: "status", label: "סטטוס", status: true },
+    { key: "number", label: "מס' תעודה", cls: "num" },
+    { key: "date", label: "תאריך", cls: "num" },
+    { key: "kind", label: "סוג" },
+    { key: "route", label: "מסלול" },
+    { key: "photos", label: "תמונות", photo: true },
+    { key: "detail", label: "הערה" },
+  ],
   missing: [
     { key: "number", label: "מס' תעודה", cls: "num" },
     { key: "date", label: "תאריך", cls: "num" },
@@ -302,7 +312,14 @@ const COLUMNS = {
   ],
 };
 
-const TAB_LABEL = { missing: "חסר", matched: "נמצא", problems: "בעיות", by_date: "לפי תאריך" };
+const TAB_LABEL = {
+  overview: "מבט כללי", missing: "חסר", matched: "נמצא",
+  problems: "בעיות", by_date: "לפי תאריך",
+};
+
+// Mirrors the server's status words; the colour is what makes a long table
+// scannable without reading every row.
+const STATUS_CLASS = { "נמצא": "ok", "חסר": "bad", "בעיה": "warn" };
 
 function render() {
   if (!payload) return;
@@ -369,7 +386,12 @@ function renderTable() {
       const td = tr.insertCell();
       if (column.cls) td.className = column.cls;
 
-      if (column.bar) {
+      if (column.status) {
+        const pill = document.createElement("span");
+        pill.className = `pill ${STATUS_CLASS[row[column.key]] || ""}`;
+        pill.textContent = row[column.key];
+        td.appendChild(pill);
+      } else if (column.bar) {
         const filled = row.total ? Math.round((100 * row.have) / row.total) : 0;
         td.innerHTML = `<span class="minibar"><span style="width:${filled}%"></span></span>`;
       } else if (column.photo) {
@@ -416,6 +438,14 @@ function reset() {
   $("upload-panel").classList.remove("hidden");
   $("file-input").value = "";
   $("folder-input").value = "";
+
+  // A fresh comparison starts on the overview, not on whichever tab the last
+  // one was left open at.
+  activeTab = "overview";
+  document.querySelector(".tab.active")?.classList.remove("active");
+  document.querySelector('.tab[data-tab="overview"]')?.classList.add("active");
+  $("filter").value = "";
+
   showSelection();
   showError("");
 }
@@ -454,7 +484,6 @@ $("stop").onclick = async () => {
 };
 
 $("export-excel").onclick = () => { window.location = `/api/jobs/${jobId}/export/excel`; };
-$("export-csv").onclick = () => { window.location = `/api/jobs/${jobId}/export/csv`; };
 
 $("tabs").addEventListener("click", (e) => {
   const tab = e.target.closest(".tab");

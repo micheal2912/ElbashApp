@@ -101,10 +101,3 @@ def to_excel(result: ComparisonResult, path: str | Path) -> Path:
                 width = max((len(str(c.value)) for c in column_cells if c.value), default=10)
                 sheet.column_dimensions[column_cells[0].column_letter].width = min(60, width + 2)
     return path
-
-
-def to_csv(result: ComparisonResult, path: str | Path) -> Path:
-    """Missing rows only - that is the actionable list."""
-    path = Path(path)
-    _frames(result)["חסרות"].to_csv(path, index=False, encoding="utf-8-sig")
-    return path

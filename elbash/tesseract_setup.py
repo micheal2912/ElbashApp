@@ -3,6 +3,7 @@
 import os
 import shutil
 import sys
+from functools import lru_cache
 from pathlib import Path
 
 def _resource_root() -> Path:
@@ -88,8 +89,14 @@ def find_tessdata() -> str:
     )
 
 
+@lru_cache(maxsize=1)
 def configure() -> tuple[str, str]:
-    """Point pytesseract at the binary and Hebrew models. Returns both paths."""
+    """Point pytesseract at the binary and Hebrew models. Returns both paths.
+
+    Cached so callers that read a single photo can call it without paying for
+    the filesystem search every time, which lets read_photo stand on its own
+    instead of silently failing when nobody configured the engine first.
+    """
     import pytesseract
 
     binary = find_binary()

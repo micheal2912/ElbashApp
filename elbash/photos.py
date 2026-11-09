@@ -4,10 +4,12 @@ import json
 import os
 import re
 import time
+from collections.abc import Collection
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+import numpy as np
 import pytesseract
 from PIL import Image, ImageOps
 
@@ -41,6 +43,15 @@ CERTIFICATE_WORD = "תעודה"
 # Below roughly 4 megapixels a photo is already cheap to read, and halving it
 # starts to cost accuracy rather than buy time.
 HALF_SCALE_ABOVE = 4_000_000
+
+# Tilt beyond about five degrees starts costing tesseract whole lines, and a
+# photo of a hand-held screen is rarely off by more than fifteen.
+SKEW_SEARCH = 15
+SKEW_STEP = 1.0
+SKEW_SAMPLE = 700
+# Below this the tilt is within what tesseract handles unaided, and rotating
+# would only resample the text for nothing.
+MIN_SKEW = 1.5
 SEVEN_DIGITS = re.compile(r"(?<!\d)(\d{7})(?!\d)")
 
 DELIVERY = "מסירה"
@@ -72,6 +83,9 @@ class PhotoResult:
     passes_used: int = 0
     error: str = ""
     seconds: float = 0.0
+    # Which rendering finally read the number, so the log says whether a photo
+    # needed straightening rather than only that it was slow.
+    fixed_by: str = ""
 
 
 def list_photos(folder: str | Path) -> list[Path]:
@@ -86,24 +100,110 @@ def _load(path: Path) -> Image.Image:
     return ImageOps.exif_transpose(Image.open(path))
 
 
+def _shrink(image: Image.Image) -> Image.Image:
+    """Half scale when the photo is big enough that the extra detail is idle.
+
+    Tesseract's cost tracks pixel count, and a 7-megapixel photo of a phone
+    screen carries far more detail than seven digits need. Half scale read the
+    same numbers in half the time across the sample folder.
+    """
+    width, height = image.size
+    if width * height > HALF_SCALE_ABOVE:
+        return image.resize((width // 2, height // 2), Image.LANCZOS)
+    return image
+
+
 def _passes(image: Image.Image):
     """Cheapest-first renderings; we stop as soon as the anchor is found."""
     width, height = image.size
 
-    # Tesseract's cost tracks pixel count, and a 7-megapixel photo of a phone
-    # screen carries far more detail than the digits need. Half scale read the
-    # same numbers in half the time across the sample folder. It is only an
-    # attempt: whatever it cannot read falls through to the full-resolution
-    # passes below, so a photo taken from further away still gets its chance.
-    if width * height > HALF_SCALE_ABOVE:
-        yield image.resize((width // 2, height // 2), Image.LANCZOS), "--psm 3"
+    # Only an attempt: whatever half scale cannot read falls through to the
+    # full-resolution passes below, so a photo taken from further away still
+    # gets its chance.
+    small = _shrink(image)
+    if small is not image:
+        yield small, "--psm 3", "half"
 
-    yield image, "--psm 3"
+    yield image, "--psm 3", "full"
 
     grey = ImageOps.autocontrast(image.convert("L"))
-    yield grey, "--psm 6"
-    yield grey, "--psm 4"
-    yield grey.resize((width * 2, height * 2), Image.LANCZOS), "--psm 6"
+    yield grey, "--psm 6", "grey psm6"
+    yield grey, "--psm 4", "grey psm4"
+    yield grey.resize((width * 2, height * 2), Image.LANCZOS), "--psm 6", "2x psm6"
+
+
+def _skew_angle(image: Image.Image) -> float:
+    """Degrees of counter-clockwise rotation needed to level the text lines.
+
+    Rotating until the horizontal projection of the ink is sharpest is the
+    classic estimate, and it needs nothing beyond the array maths pandas
+    already brings in. The search runs on a thumbnail because the tilt of a
+    page does not change with resolution, and probing a full-size photo would
+    cost more than simply reading it.
+    """
+    grey = ImageOps.autocontrast(image.convert("L"))
+    grey.thumbnail((SKEW_SAMPLE, SKEW_SAMPLE), Image.BILINEAR)
+
+    # Text rows only stand out once the background is gone, and a photo of a
+    # screen can be dark text on light or the reverse, so pick the polarity
+    # from the image rather than assuming one.
+    levels = np.asarray(grey, dtype=np.uint8)
+    ink = levels < 128 if levels.mean() > 127 else levels > 127
+    mask = Image.fromarray(ink.astype(np.uint8) * 255)
+
+    best_angle, best_score = 0.0, -1.0
+    for angle in np.arange(-SKEW_SEARCH, SKEW_SEARCH + SKEW_STEP, SKEW_STEP):
+        rotated = mask.rotate(float(angle), resample=Image.BILINEAR, fillcolor=0)
+        profile = np.asarray(rotated, dtype=np.float32).sum(axis=1)
+        # Level lines make the row totals swing hard between text and gap; the
+        # derivative peaks exactly where that contrast is greatest.
+        score = float(np.diff(profile).var())
+        if score > best_score:
+            best_angle, best_score = float(angle), score
+    return best_angle
+
+
+def _straighten(image: Image.Image, angle: float) -> Image.Image:
+    # Fill from a corner so the padding reads as screen border rather than as
+    # a hard edge the layout analysis might mistake for a column.
+    corner = image.getpixel((0, 0))
+    return image.rotate(angle, resample=Image.BICUBIC, expand=True, fillcolor=corner)
+
+
+def _deskew_passes(image: Image.Image):
+    """Straightened renderings, for a photo taken at an angle to the screen.
+
+    Past about five degrees of tilt tesseract starts reading digits wrong
+    rather than not at all, which is the expensive kind of wrong: the number
+    it invents is absent from the report, so the photo is filed as a delivery
+    nobody ordered while the delivery it actually shows reads as missing.
+    """
+    angle = _skew_angle(image)
+    if abs(angle) >= MIN_SKEW:
+        straight = _straighten(image, angle)
+        yield _shrink(straight), "--psm 3", f"deskew {angle:+.0f}"
+        yield ImageOps.autocontrast(straight.convert("L")), "--psm 6", f"deskew {angle:+.0f} grey"
+
+
+def _rotation_passes(image: Image.Image):
+    """Quarter turns, for a photo taken with the phone held sideways.
+
+    Kept apart from the deskew passes because the two symptoms differ: a tilted
+    photo reads the wrong number, while a sideways one reads no number at all.
+    Trying four orientations costs four more OCR runs, so it is worth spending
+    only on the photos that came back with nothing.
+    """
+    for name, turn in (("rot270", Image.ROTATE_270),
+                       ("rot90", Image.ROTATE_90),
+                       ("rot180", Image.ROTATE_180)):
+        turned = image.transpose(turn)
+        yield _shrink(turned), "--psm 3", name
+
+        # A sideways photo is usually a little tilted as well, so straighten
+        # each turn before giving up on it.
+        angle = _skew_angle(turned)
+        if abs(angle) >= MIN_SKEW:
+            yield _shrink(_straighten(turned, angle)), "--psm 3", f"{name} deskew {angle:+.0f}"
 
 
 def _parse_text(text: str) -> tuple[str | None, str, str, list[str]]:
@@ -141,15 +241,23 @@ def _parse_text(text: str) -> tuple[str | None, str, str, list[str]]:
     return anchored, kind, anchor_line, candidates
 
 
-def read_photo(path: str | Path) -> PhotoResult:
-    """OCR one screenshot, escalating preprocessing until the number is found."""
+def read_photo(path: str | Path, known: Collection[str] | None = None) -> PhotoResult:
+    """OCR one screenshot, escalating preprocessing until the number is found.
+
+    `known` is the set of certificate numbers the report contains. Given it,
+    a reading the report does not recognise is treated as unfinished rather
+    than as an answer, because that is what a misread looks like: a tilted
+    photo yields a confident seven digits with one digit wrong, which would
+    otherwise be filed as a photo of a delivery nobody ordered.
+    """
     started = time.monotonic()
-    result = _read_photo(path)
+    result = _read_photo(path, known)
     result.seconds = time.monotonic() - started
     return result
 
 
-def _read_photo(path: str | Path) -> PhotoResult:
+def _read_photo(path: str | Path, known: Collection[str] | None = None) -> PhotoResult:
+    tesseract_setup.configure()
     path = Path(path)
     result = PhotoResult(file=path.name)
 
@@ -160,7 +268,19 @@ def _read_photo(path: str | Path) -> PhotoResult:
         return result
 
     seen: list[str] = []
-    for index, (variant, config) in enumerate(_passes(image), start=1):
+    unvouched: tuple[str, str, str, str] | None = None
+
+    def ladder():
+        yield from _passes(image)
+        yield from _deskew_passes(image)
+        # No seven digits anywhere, at any contrast, is the signature of a
+        # photo held sideways: the text runs vertically and tesseract returns
+        # nothing rather than something wrong. Only then are quarter turns
+        # worth their cost.
+        if not seen:
+            yield from _rotation_passes(image)
+
+    for index, (variant, config, label) in enumerate(ladder(), start=1):
         try:
             text = pytesseract.image_to_string(variant, lang="heb+eng", config=config)
         except Exception as exc:
@@ -172,14 +292,29 @@ def _read_photo(path: str | Path) -> PhotoResult:
             if candidate not in seen:
                 seen.append(candidate)
 
-        if number:
+        if not number:
+            continue
+
+        if known is None or number in known:
             result.number = number
             result.kind = kind
             result.anchor_line = anchor_line
             result.confidence = CONFIDENCE_ANCHOR
             result.passes_used = index
             result.candidates = seen
+            result.fixed_by = label
             return result
+
+        # Hold the first unrecognised reading and carry on down the ladder. A
+        # straightened pass usually reads it correctly; if none does, this is
+        # still the best answer we have, and a photo belonging to a different
+        # report should say so rather than look unreadable.
+        if unvouched is None:
+            unvouched = (number, kind, anchor_line, label)
+
+    if unvouched is not None:
+        result.number, result.kind, result.anchor_line, result.fixed_by = unvouched
+        result.confidence = CONFIDENCE_ANCHOR
 
     result.passes_used = index
     result.candidates = seen
@@ -197,6 +332,7 @@ def read_folder(
     use_cache: bool = True,
     workers: int | None = None,
     should_stop=None,
+    known: Collection[str] | None = None,
 ) -> list[PhotoResult]:
     """OCR every image in a folder, reusing cached results where possible."""
     tesseract_setup.configure()
@@ -230,7 +366,7 @@ def read_folder(
         workers = max(1, min(workers or OCR_WORKERS, len(pending)))
         clock = time.monotonic()
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = {pool.submit(read_photo, p): p for p in pending}
+            futures = {pool.submit(read_photo, p, known): p for p in pending}
             try:
                 for future in as_completed(futures):
                     path = futures[future]
@@ -241,6 +377,7 @@ def read_folder(
                     _log(
                         f"photo {done}/{total} {result.seconds:5.1f}s "
                         f"{result.passes_used} pass{'' if result.passes_used == 1 else 'es'} "
+                        f"[{result.fixed_by or 'unread'}] "
                         f"{result.number or result.error or 'no number'} {path.name}"
                     )
                     if progress:

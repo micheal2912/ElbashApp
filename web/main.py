@@ -251,13 +251,11 @@ def job_state(job_id: str, user: str = Depends(current_user)):
     return _job_or_404(job_id, user).state()
 
 
-@app.get("/api/jobs/{job_id}/export/{kind}")
-def download_export(job_id: str, kind: str, user: str = Depends(current_user)):
-    if kind not in {"excel", "csv"}:
-        raise HTTPException(status_code=404, detail="סוג ייצוא לא מוכר.")
+@app.get("/api/jobs/{job_id}/export/excel")
+def download_export(job_id: str, user: str = Depends(current_user)):
     job = _job_or_404(job_id, user)
     try:
-        path = jobs.export_file(job, kind)
+        path = jobs.export_file(job)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
     # A Hebrew filename has to be percent-encoded for the Content-Disposition header.

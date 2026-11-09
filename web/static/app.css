@@ -194,6 +194,17 @@ td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 .photo-link { color: var(--accent); cursor: pointer; text-decoration: underline; }
 
+/* Status badge for the overview tab, where every row carries its own verdict
+   and colour is what lets a thousand rows be skimmed rather than read. */
+.pill {
+  display: inline-block; padding: 2px 9px; border-radius: 99px;
+  font-size: 12px; font-weight: 600; white-space: nowrap;
+  background: #eef1f4; color: var(--muted);
+}
+.pill.ok { background: #e6f4ea; color: var(--good); }
+.pill.bad { background: #fdecea; color: var(--bad); }
+.pill.warn { background: #fff4d6; color: var(--warn); }
+
 /* A tiny inline coverage bar for the per-date tab. */
 .minibar { display: inline-block; width: 160px; height: 8px; background: #e7ebf0; border-radius: 99px; overflow: hidden; vertical-align: middle; }
 .minibar > span { display: block; height: 100%; background: var(--good); }

@@ -12,6 +12,7 @@ import shutil
 import sys
 import tempfile
 import time
+from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -159,13 +160,22 @@ def main_test() -> int:
         check("missing table length", len(state["result"]["missing"]), EXPECTED["missing"])
         check("by_date has entries", len(state["result"]["by_date"]) > 0)
 
+        # The overview is meant to hold everything: one row per report row,
+        # plus the problem photos, which belong to no row.
+        overview = state["result"]["overview"]
+        check("overview covers rows and problems",
+              len(overview), EXPECTED["rows"] + EXPECTED["problems"])
+        statuses = Counter(row["status"] for row in overview)
+        check("overview found count", statuses["נמצא"], EXPECTED["matched"])
+        check("overview missing count", statuses["חסר"], EXPECTED["missing"])
+        check("overview problem count", statuses["בעיה"], EXPECTED["problems"])
+
         print("\n-- downloads")
         xlsx = client.get(f"/api/jobs/{job_id}/export/excel")
         check("excel status", xlsx.status_code, 200)
         check("excel is a zip container", xlsx.content[:2], b"PK")
-        csv = client.get(f"/api/jobs/{job_id}/export/csv")
-        check("csv status", csv.status_code, 200)
-        check("csv is UTF-8 BOM", csv.content[:3], b"\xef\xbb\xbf")
+        gone = client.get(f"/api/jobs/{job_id}/export/csv")
+        check("retired csv export is 404", gone.status_code, 404)
 
         photo_name = payload_files[0].name
         img = client.get(f"/api/jobs/{job_id}/photo/{photo_name}")
