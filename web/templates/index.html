@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block body %}
+<header class="topbar">
+  <h1>{{ title }}</h1>
+  <div class="topbar-end">
+    <span class="muted">{{ user }}</span>
+    <a class="link" href="/logout">יציאה</a>
+  </div>
+</header>
+
+<main class="page">
+
+  <section class="panel" id="upload-panel">
+    <div class="dropzone" id="dropzone" tabindex="0" role="button"
+         aria-label="בחירת קבצים">
+      <div class="dropzone-icon">📁</div>
+      <div class="dropzone-title">גררו לכאן את תיקיית החודש</div>
+      <div class="dropzone-sub">
+        או <button type="button" class="link" id="pick-files">בחרו קבצים</button>
+        · <button type="button" class="link" id="pick-folder">בחרו תיקייה</button>
+      </div>
+      <div class="dropzone-hint muted">
+        צילומי המסך של המשלוחים + קובץ ה-PDF של הדוח
+      </div>
+      <input type="file" id="file-input" multiple hidden
+             accept=".jpg,.jpeg,.png,.bmp,.webp,.tif,.tiff,.pdf">
+      <input type="file" id="folder-input" webkitdirectory directory multiple hidden>
+    </div>
+
+    <div class="selection hidden" id="selection">
+      <div class="selection-counts">
+        <span id="count-photos">0 תמונות</span>
+        <span class="sep">·</span>
+        <span id="count-pdf">ללא דוח</span>
+        <span class="sep">·</span>
+        <span id="count-size" class="muted">0 מ״ב</span>
+      </div>
+      <div class="selection-actions">
+        <button type="button" class="ghost" id="clear">ניקוי</button>
+        <button type="button" class="primary" id="run">התחלת השוואה</button>
+      </div>
+    </div>
+
+    <div class="alert error hidden" id="upload-error"></div>
+  </section>
+
+  <section class="panel hidden" id="progress-panel">
+    <div class="progress-head">
+      <span id="progress-message">מתחיל…</span>
+      <span class="muted ltr" id="progress-detail"></span>
+    </div>
+    <div class="bar"><div class="bar-fill" id="progress-bar"></div></div>
+    <div class="progress-foot">
+      <span class="muted" id="progress-count"></span>
+      <button type="button" class="ghost" id="stop">עצירה</button>
+    </div>
+  </section>
+
+  <section class="hidden" id="results">
+    <div class="cards">
+      <div class="card"><div class="card-value" id="c-rows">–</div><div class="card-name">שורות בדוח</div></div>
+      <div class="card"><div class="card-value" id="c-photos">–</div><div class="card-name">תמונות</div></div>
+      <div class="card"><div class="card-value" id="c-matched">–</div><div class="card-name">נמצאו</div></div>
+      <div class="card"><div class="card-value" id="c-missing">–</div><div class="card-name">חסרות</div></div>
+      <div class="card"><div class="card-value" id="c-problems">–</div><div class="card-name">בעיות</div></div>
+      <div class="card"><div class="card-value" id="c-coverage">–</div><div class="card-name">כיסוי</div></div>
+    </div>
+
+    <div class="verdict" id="verdict"></div>
+
+    <section class="panel">
+      <div class="tabs" id="tabs" role="tablist">
+        <button class="tab active" data-tab="missing" role="tab">חסר</button>
+        <button class="tab" data-tab="matched" role="tab">נמצא</button>
+        <button class="tab" data-tab="problems" role="tab">בעיות</button>
+        <button class="tab" data-tab="by_date" role="tab">לפי תאריך</button>
+        <div class="tabs-end">
+          <input type="search" id="filter" placeholder="חיפוש בטבלה…">
+          <button type="button" class="ghost" id="export-excel">ייצוא לאקסל</button>
+          <button type="button" class="ghost" id="export-csv">ייצוא חסרות</button>
+          <button type="button" class="ghost" id="restart">השוואה חדשה</button>
+        </div>
+      </div>
+      <div class="table-wrap"><table id="table"><thead></thead><tbody></tbody></table></div>
+      <div class="table-foot muted" id="table-foot"></div>
+    </section>
+  </section>
+</main>
+
+<div class="lightbox hidden" id="lightbox">
+  <img id="lightbox-img" alt="">
+  <div class="lightbox-name ltr" id="lightbox-name"></div>
+</div>
+
+<script>
+  window.ELBASH = {
+    csrf: {{ csrf | tojson }},
+    limits: {{ limits | tojson }}
+  };
+</script>
+<script src="/static/app.js"></script>
+{% endblock %}

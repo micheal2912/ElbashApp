@@ -1,0 +1,13 @@
+# Never commit: holds the session signing key, the password hashes and the
+# customers' delivery photos.
+data/
+.env
+
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+build/
+dist/
+*.spec
+docs/screenshots/*.png

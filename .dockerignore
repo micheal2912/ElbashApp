@@ -1,0 +1,13 @@
+.git
+.gitignore
+__pycache__/
+**/__pycache__/
+*.pyc
+build/
+data/
+compiled_windows/
+compiled_mac/
+*.spec
+.venv/
+venv/
+README.md

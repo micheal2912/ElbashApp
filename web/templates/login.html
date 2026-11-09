@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block body %}
+<main class="login-wrap">
+  <form class="login-card" method="post" action="/login" autocomplete="on">
+    <h1>{{ title }}</h1>
+    <p class="muted">התחברו כדי להשוות בין צילומי המשלוחים לדוח התפוקה.</p>
+
+    {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+
+    <label for="username">שם משתמש</label>
+    <input id="username" name="username" value="{{ username or '' }}"
+           autocomplete="username" required autofocus dir="ltr">
+
+    <label for="password">סיסמה</label>
+    <input id="password" name="password" type="password"
+           autocomplete="current-password" required dir="ltr">
+
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button type="submit" class="primary wide">כניסה</button>
+  </form>
+</main>
+{% endblock %}

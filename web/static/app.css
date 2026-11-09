@@ -1,0 +1,201 @@
+/* אלבאש בדיקת משלוחים - the document is dir="rtl", so the browser mirrors
+   the layout for us and logical properties keep it that way. */
+
+:root {
+  --bg: #f4f6f8;
+  --panel: #ffffff;
+  --line: #dfe3e8;
+  --text: #1c2430;
+  --muted: #6b7684;
+  --accent: #1452c4;
+  --accent-dark: #0e3c93;
+  --good: #1a7f37;
+  --bad: #b42318;
+  --warn: #9a6700;
+  --radius: 10px;
+  --shadow: 0 1px 2px rgba(16, 24, 40, .06), 0 1px 3px rgba(16, 24, 40, .1);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.5 "Segoe UI", Rubik, "Helvetica Neue", Arial, "Noto Sans Hebrew", sans-serif;
+}
+
+h1 { font-size: 19px; margin: 0; font-weight: 600; }
+.muted { color: var(--muted); }
+.hidden { display: none !important; }
+
+/* Filenames and numbers read left-to-right even inside Hebrew text. */
+.ltr { direction: ltr; unicode-bidi: isolate; text-align: start; }
+
+/* ----------------------------------------------------------------- shell */
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; padding: 12px 24px;
+  background: var(--panel); border-bottom: 1px solid var(--line);
+}
+.topbar-end { display: flex; align-items: center; gap: 14px; }
+
+.page { max-width: 1280px; margin: 0 auto; padding: 20px 24px 48px; }
+
+.panel {
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 16px; margin-bottom: 16px;
+}
+
+/* ---------------------------------------------------------------- inputs */
+button { font: inherit; cursor: pointer; border-radius: 8px; }
+
+button.primary {
+  background: var(--accent); color: #fff; border: 1px solid var(--accent);
+  padding: 9px 20px; font-weight: 600;
+}
+button.primary:hover { background: var(--accent-dark); }
+button.primary:disabled { background: #9fb3d9; border-color: #9fb3d9; cursor: default; }
+
+button.ghost {
+  background: var(--panel); color: var(--text);
+  border: 1px solid var(--line); padding: 8px 14px;
+}
+button.ghost:hover { background: #eef1f5; }
+
+button.link, a.link {
+  background: none; border: none; padding: 0;
+  color: var(--accent); text-decoration: none; font: inherit; cursor: pointer;
+}
+button.link:hover, a.link:hover { text-decoration: underline; }
+button.wide { width: 100%; }
+
+input[type="text"], input[type="password"], input[type="search"] {
+  font: inherit; padding: 9px 12px;
+  border: 1px solid var(--line); border-radius: 8px; background: #fff;
+}
+input:focus-visible, button:focus-visible, .dropzone:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+
+.alert { padding: 10px 14px; border-radius: 8px; margin-top: 12px; }
+.alert.error { background: #fdecea; color: var(--bad); border: 1px solid #f5c6c2; }
+
+/* ----------------------------------------------------------------- login */
+.login-wrap { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+.login-card {
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 14px; box-shadow: var(--shadow);
+  padding: 32px; width: min(400px, 100%);
+}
+.login-card h1 { margin-bottom: 4px; }
+.login-card p { margin: 0 0 20px; font-size: 14px; }
+.login-card label { display: block; margin: 14px 0 6px; font-weight: 600; font-size: 14px; }
+.login-card input { width: 100%; }
+.login-card button { margin-top: 22px; }
+
+/* -------------------------------------------------------------- dropzone */
+.dropzone {
+  border: 2px dashed var(--line); border-radius: var(--radius);
+  padding: 40px 20px; text-align: center;
+  transition: background .15s, border-color .15s;
+}
+.dropzone.over { border-color: var(--accent); background: #eff4fe; }
+.dropzone-icon { font-size: 34px; line-height: 1; }
+.dropzone-title { font-size: 17px; font-weight: 600; margin-top: 10px; }
+.dropzone-sub { margin-top: 6px; }
+.dropzone-hint { margin-top: 10px; font-size: 13px; }
+
+.selection {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap; margin-top: 16px;
+  padding-top: 16px; border-top: 1px solid var(--line);
+}
+.selection-counts { font-weight: 600; }
+.selection-actions { display: flex; gap: 8px; }
+.sep { color: var(--muted); margin: 0 6px; font-weight: 400; }
+
+/* -------------------------------------------------------------- progress */
+.progress-head, .progress-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-bottom: 8px;
+}
+.progress-foot { margin: 8px 0 0; }
+.bar { height: 8px; background: #e7ebf0; border-radius: 99px; overflow: hidden; }
+.bar-fill {
+  height: 100%; width: 0; border-radius: 99px;
+  background: var(--accent); transition: width .2s ease;
+}
+
+/* ----------------------------------------------------------------- cards */
+.cards {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px; margin-bottom: 16px;
+}
+.card {
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px 16px;
+}
+.card-value { font-size: 26px; font-weight: 700; line-height: 1.2; }
+.card-value.good { color: var(--good); }
+.card-value.bad { color: var(--bad); }
+.card-name { color: var(--muted); font-size: 13px; margin-top: 2px; }
+
+.verdict { font-weight: 600; margin: 0 0 16px; padding: 0 2px; }
+.verdict.good { color: var(--good); }
+.verdict.bad { color: var(--bad); }
+
+/* ------------------------------------------------------------------ tabs */
+.tabs {
+  display: flex; align-items: center; gap: 4px;
+  border-bottom: 1px solid var(--line); margin: -16px -16px 12px; padding: 6px 12px 0;
+  flex-wrap: wrap;
+}
+.tab {
+  background: none; border: none; border-bottom: 2px solid transparent;
+  padding: 10px 16px; color: var(--muted); font-weight: 600; border-radius: 0;
+}
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.tabs-end {
+  margin-inline-start: auto; display: flex; gap: 8px; align-items: center;
+  padding-bottom: 6px; flex-wrap: wrap;
+}
+.tabs-end input[type="search"] { width: 200px; }
+
+/* ---------------------------------------------------------------- tables */
+.table-wrap { max-height: 58vh; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+thead th {
+  position: sticky; top: 0; z-index: 1;
+  background: #f0f3f7; text-align: start; font-weight: 600;
+  padding: 9px 12px; border-bottom: 1px solid var(--line); white-space: nowrap;
+}
+tbody td { padding: 8px 12px; border-bottom: 1px solid #eef1f4; }
+tbody tr:nth-child(even) { background: #fafbfc; }
+tbody tr:hover { background: #eff4fe; }
+td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.table-foot { margin-top: 8px; font-size: 13px; }
+.empty { padding: 28px; text-align: center; color: var(--muted); }
+
+.photo-link { color: var(--accent); cursor: pointer; text-decoration: underline; }
+
+/* A tiny inline coverage bar for the per-date tab. */
+.minibar { display: inline-block; width: 160px; height: 8px; background: #e7ebf0; border-radius: 99px; overflow: hidden; vertical-align: middle; }
+.minibar > span { display: block; height: 100%; background: var(--good); }
+
+/* ------------------------------------------------------------- lightbox */
+.lightbox {
+  position: fixed; inset: 0; z-index: 50; cursor: zoom-out;
+  background: rgba(14, 18, 24, .85);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+}
+.lightbox img { max-width: 92vw; max-height: 84vh; border-radius: 8px; background: #fff; }
+.lightbox-name { color: #e8ecf1; font-size: 14px; }
+
+@media (max-width: 720px) {
+  .page { padding: 14px; }
+  .tabs-end { width: 100%; }
+  .tabs-end input[type="search"] { flex: 1; width: auto; }
+}

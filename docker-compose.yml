@@ -1,0 +1,25 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      # Bound to localhost: put a TLS terminator (Caddy, nginx, Cloudflare) in
+      # front of it. The session cookie is marked Secure, so plain HTTP from
+      # another machine will not keep you logged in.
+      - "127.0.0.1:8000:8000"
+    environment:
+      # Generate once with: python -c "import secrets;print(secrets.token_urlsafe(48))"
+      ELBASH_SECRET_KEY: "${ELBASH_SECRET_KEY:?set ELBASH_SECRET_KEY in .env}"
+      ELBASH_SECURE_COOKIES: "1"
+      ELBASH_MAX_CONCURRENT_JOBS: "1"
+      ELBASH_JOB_TTL_HOURS: "24"
+      ELBASH_MAX_FILES: "5000"
+      ELBASH_MAX_JOB_MB: "4096"
+      # Used only by "manage bootstrap" on an empty database.
+      ELBASH_ADMIN_USER: "${ELBASH_ADMIN_USER:-}"
+      ELBASH_ADMIN_PASSWORD: "${ELBASH_ADMIN_PASSWORD:-}"
+    volumes:
+      - elbash-data:/data
+
+volumes:
+  elbash-data:
