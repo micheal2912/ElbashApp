@@ -228,6 +228,7 @@ def read_folder(
 
     if pending:
         workers = max(1, min(workers or OCR_WORKERS, len(pending)))
+        clock = time.monotonic()
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = {pool.submit(read_photo, p): p for p in pending}
             try:
@@ -251,9 +252,40 @@ def read_folder(
                 for future in futures:
                     future.cancel()
 
+        _log_summary([results[p.name] for p in pending if p.name in results],
+                     time.monotonic() - clock, workers)
+
         try:
             cache_path.write_text(json.dumps(cache, ensure_ascii=False, indent=1), encoding="utf-8")
         except Exception:
             pass
 
     return [results[p.name] for p in files if p.name in results]
+
+
+def _log_summary(read: list[PhotoResult], elapsed: float, workers: int) -> None:
+    """Close the run with the numbers that decide whether to tune anything.
+
+    Which photos were expensive is the whole question: a photo read on the
+    first pass is near the floor, while one that falls through to the last
+    costs several times that. The split between them is what says whether the
+    escalation ladder is worth reworking, and it cannot be guessed from a
+    sample - it depends on how the month's photos were taken.
+    """
+    if not read:
+        return
+
+    tally: dict[int, int] = {}
+    for result in read:
+        tally[result.passes_used] = tally.get(result.passes_used, 0) + 1
+    spread = "  ".join(f"{passes} pass: {count}" for passes, count in sorted(tally.items()))
+
+    slowest = sorted(read, key=lambda r: r.seconds, reverse=True)[:3]
+    worst = ", ".join(f"{r.file} {r.seconds:.1f}s" for r in slowest)
+
+    _log(
+        f"photos done: {len(read)} in {elapsed:.1f}s "
+        f"({elapsed / len(read):.2f}s each, {workers} workers)\n"
+        f"  passes: {spread}\n"
+        f"  slowest: {worst}"
+    )
