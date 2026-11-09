@@ -1,7 +1,6 @@
 """OCR delivery screenshots and pull out the מספר משלוח value."""
 
 import json
-import os
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
@@ -11,6 +10,7 @@ import pytesseract
 from PIL import Image, ImageOps
 
 from . import tesseract_setup
+from .cpu import available_cores
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
 CACHE_NAME = ".elbash_ocr_cache.json"
@@ -20,7 +20,7 @@ CACHE_NAME = ".elbash_ocr_cache.json"
 # handing each worker a batch of images both measured slower (0.99x and 0.90x
 # on 44 photos). Scaling with the core count is what helps; gains flatten out
 # past 16 because the tesseract processes start contending for cores.
-OCR_WORKERS = min(16, max(2, os.cpu_count() or 4))
+OCR_WORKERS = min(16, max(2, available_cores()))
 
 # Tesseract reads "משלוח" as "ישלוח"/"משלות" on dim photos, so anchor on the
 # stable "שלוח" core instead of the full word.

@@ -13,7 +13,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
-from elbash import pdf_report, photos, tesseract_setup
+from elbash import cpu, pdf_report, photos, tesseract_setup
 
 from . import auth, jobs, settings
 
@@ -31,6 +31,35 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory=str(HERE / "static")), name="static")
 
 
+def _memory_budget() -> str:
+    """How much RAM this process may actually use, as the container sees it.
+
+    Each PDF worker is a separate process holding its own pdfplumber state, so
+    an under-provisioned container swaps instead of running, which looks like
+    slowness rather than an error.
+    """
+    for path, unlimited in (
+        ("/sys/fs/cgroup/memory.max", "max"),                  # cgroup v2
+        ("/sys/fs/cgroup/memory/memory.limit_in_bytes", None),  # cgroup v1
+    ):
+        try:
+            raw = Path(path).read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+        if raw == unlimited:
+            break
+        value = int(raw)
+        if value < 1 << 62:  # cgroup v1 uses a huge sentinel for "no limit"
+            return f"{value / 1024 / 1024:,.0f} MB"
+        break
+
+    try:
+        total = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+        return f"{total / 1024 / 1024:,.0f} MB (no container limit)"
+    except (AttributeError, OSError, ValueError):
+        return "unknown"
+
+
 @app.on_event("startup")
 def _startup() -> None:
     auth.init_db()
@@ -42,10 +71,13 @@ def _startup() -> None:
         # The worker counts come from the cores this process can actually see,
         # which inside Docker is whatever the VM was given - not the host's.
         # Printing it makes an under-provisioned container obvious.
+        usable, machine = cpu.available_cores(), os.cpu_count()
+        limited = "" if usable == machine else f" ({machine} on the machine, capped)"
         print(
             f"Machine  : {platform.machine()} on {platform.system()}, "
-            f"{os.cpu_count()} cores visible"
+            f"{usable} cores usable{limited}"
         )
+        print(f"Memory   : {_memory_budget()}")
         print(f"Workers  : {photos.OCR_WORKERS} for photos, "
               f"{pdf_report.PDF_WORKERS} for the report")
     except tesseract_setup.TesseractMissing as exc:

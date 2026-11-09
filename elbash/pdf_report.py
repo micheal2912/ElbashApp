@@ -1,7 +1,6 @@
 """Read the courier payout PDF and pull out the מס' תעודה column."""
 
 import json
-import os
 import re
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
@@ -9,6 +8,7 @@ from pathlib import Path
 
 import pdfplumber
 
+from .cpu import available_cores
 from .rtl import fix_rtl
 
 CACHE_NAME = ".elbash_pdf_cache.json"
@@ -17,7 +17,7 @@ CACHE_NAME = ".elbash_pdf_cache.json"
 # split across processes rather than threads. Each worker opens its own handle.
 # Threads were measured at 0.91x of sequential here - all contention, no gain -
 # against 5.3x for processes. Past 16 the spawn cost outweighs the extra pages.
-PDF_WORKERS = min(16, max(2, os.cpu_count() or 4))
+PDF_WORKERS = min(16, max(2, available_cores()))
 MIN_PAGES_FOR_POOL = 8
 
 # A data row ends (visually) with: <date> <7-digit certificate no.> <kind>
