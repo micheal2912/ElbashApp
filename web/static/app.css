@@ -133,6 +133,14 @@ input:focus-visible, button:focus-visible, .dropzone:focus-visible {
   background: var(--accent); transition: width .2s ease;
 }
 
+/* Every photo is read in parallel, so nothing completes for the first few
+   seconds and a value-based bar would sit at zero looking stuck. */
+.bar.indeterminate .bar-fill { width: 35%; animation: sweep 1.2s ease-in-out infinite; }
+@keyframes sweep {
+  from { margin-inline-start: -35%; }
+  to   { margin-inline-start: 100%; }
+}
+
 /* ----------------------------------------------------------------- cards */
 .cards {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));

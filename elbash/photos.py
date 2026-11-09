@@ -26,6 +26,10 @@ OCR_WORKERS = min(16, max(2, os.cpu_count() or 4))
 # stable "שלוח" core instead of the full word.
 ANCHOR = "שלוח"
 CERTIFICATE_WORD = "תעודה"
+
+# Below roughly 4 megapixels a photo is already cheap to read, and halving it
+# starts to cost accuracy rather than buy time.
+HALF_SCALE_ABOVE = 4_000_000
 SEVEN_DIGITS = re.compile(r"(?<!\d)(\d{7})(?!\d)")
 
 DELIVERY = "מסירה"
@@ -63,6 +67,15 @@ def _load(path: Path) -> Image.Image:
 def _passes(image: Image.Image):
     """Cheapest-first renderings; we stop as soon as the anchor is found."""
     width, height = image.size
+
+    # Tesseract's cost tracks pixel count, and a 7-megapixel photo of a phone
+    # screen carries far more detail than the digits need. Half scale read the
+    # same numbers in half the time across the sample folder. It is only an
+    # attempt: whatever it cannot read falls through to the full-resolution
+    # passes below, so a photo taken from further away still gets its chance.
+    if width * height > HALF_SCALE_ABOVE:
+        yield image.resize((width // 2, height // 2), Image.LANCZOS), "--psm 3"
+
     yield image, "--psm 3"
 
     grey = ImageOps.autocontrast(image.convert("L"))

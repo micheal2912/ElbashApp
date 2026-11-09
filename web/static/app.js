@@ -203,7 +203,12 @@ function setProgress(done, total, message, detail) {
   $("progress-message").textContent = message || "";
   $("progress-detail").textContent = detail || "";
   $("progress-count").textContent = total ? `${done} / ${total}` : "";
-  $("progress-bar").style.width = total ? `${(100 * done) / total}%` : "0%";
+
+  // Nothing has finished yet, but work is happening - sweep rather than sit
+  // at zero, which reads as a hang.
+  const waiting = done === 0;
+  $("progress-bar").parentElement.classList.toggle("indeterminate", waiting);
+  if (!waiting) $("progress-bar").style.width = `${(100 * done) / total}%`;
 }
 
 async function run() {

@@ -192,6 +192,7 @@ def stop(job: Job) -> None:
 
 
 def _run(job: Job) -> None:
+    started = time.time()
     try:
         job.progress(status="running", phase="pdf", message="קורא את הדוח…")
         pdf = pdf_report.find_report_pdf(job.folder)
@@ -204,6 +205,7 @@ def _run(job: Job) -> None:
         # Every job gets a fresh directory, so the on-disk OCR cache can never
         # hit; skipping it avoids writing a file nothing will ever read.
         report = pdf_report.read_report(pdf, progress=pdf_progress, use_cache=False)
+        pdf_done = time.time()
         if job.stop_flag.is_set():
             job.progress(status="stopped", message="הופסק.")
             return
@@ -233,6 +235,15 @@ def _run(job: Job) -> None:
 
         job.result = compare_mod.compare(report, results)
         job.progress(status="done", phase="done", message="הסתיים.", detail="")
+        # Printed so a slow run can be split into its two halves from the logs
+        # without reproducing it.
+        photo_seconds = time.time() - pdf_done
+        print(
+            f"job {job.id}: pdf {pdf_done - started:.1f}s "
+            f"({len(report.rows)} rows), photos {photo_seconds:.1f}s "
+            f"({len(results)} images, {photo_seconds / max(1, len(results)):.1f}s each, "
+            f"{photos.OCR_WORKERS} workers)"
+        )
 
     except Exception as exc:
         job.error = str(exc)

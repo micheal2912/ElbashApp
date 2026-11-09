@@ -1,5 +1,7 @@
 """FastAPI application: login, uploads, the comparison queue and downloads."""
 
+import os
+import platform
 import secrets
 from pathlib import Path
 from urllib.parse import quote
@@ -11,7 +13,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
-from elbash import tesseract_setup
+from elbash import pdf_report, photos, tesseract_setup
 
 from . import auth, jobs, settings
 
@@ -37,6 +39,15 @@ def _startup() -> None:
     try:
         binary, tessdata = tesseract_setup.configure()
         print(f"Tesseract: {binary}\nTessdata : {tessdata}")
+        # The worker counts come from the cores this process can actually see,
+        # which inside Docker is whatever the VM was given - not the host's.
+        # Printing it makes an under-provisioned container obvious.
+        print(
+            f"Machine  : {platform.machine()} on {platform.system()}, "
+            f"{os.cpu_count()} cores visible"
+        )
+        print(f"Workers  : {photos.OCR_WORKERS} for photos, "
+              f"{pdf_report.PDF_WORKERS} for the report")
     except tesseract_setup.TesseractMissing as exc:
         # Surfaced per job as well; logging it at boot makes a broken image obvious.
         print(f"WARNING: {exc}")
